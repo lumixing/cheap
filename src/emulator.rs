@@ -98,6 +98,19 @@ impl Emulator {
         self.execute(op);
     }
 
+    pub fn tick_timers(&mut self) {
+        if self.dt > 0 {
+            self.dt -= 1;
+        }
+
+        if self.st > 0 {
+            if self.st == 1 {
+                // beep
+            }
+            self.st -= 1;
+        }
+    }
+
     pub fn load(&mut self, data: &[u8]) {
         let start = START_ADDR as usize;
         let end = (START_ADDR as usize) + data.len();
@@ -132,9 +145,37 @@ impl Emulator {
             (0, 0, 0xE, 0) => {
                 self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
             }
+            // RET
+            (0, 0, 0xE, 0xE) => {
+                let pc = self.pop();
+                self.pc = pc;
+            }
             // JMP NNN
             (1, _, _, _) => {
                 self.pc = nnn;
+            }
+            // CALL NNN
+            (2, _, _, _) => {
+                self.push(self.pc);
+                self.pc = nnn;
+            }
+            // SE X NN
+            (3, _, _, _) => {
+                if self.v_reg[x] == nn {
+                    self.pc += 2;
+                }
+            }
+            // SNE X NN
+            (4, _, _, _) => {
+                if self.v_reg[x] != nn {
+                    self.pc += 2;
+                }
+            }
+            // SE X Y
+            (5, _, _, 0) => {
+                if self.v_reg[x] == self.v_reg[y] {
+                    self.pc += 2;
+                }
             }
             // VX = NN
             (6, _, _, _) => {
@@ -144,12 +185,72 @@ impl Emulator {
             (7, _, _, _) => {
                 self.v_reg[x] = self.v_reg[x].wrapping_add(nn);
             }
+            // X = Y
+            (8, _, _, 0) => {
+                self.v_reg[x] = self.v_reg[y];
+            }
+            // X |= Y
+            (8, _, _, 1) => {
+                self.v_reg[x] |= self.v_reg[y];
+            }
+            // X &= Y
+            (8, _, _, 2) => {
+                self.v_reg[x] &= self.v_reg[y];
+            }
+            // X ^= Y
+            (8, _, _, 3) => {
+                self.v_reg[x] ^= self.v_reg[y];
+            }
+            // X += Y
+            (8, _, _, 4) => {
+                let (vx, carry) = self.v_reg[x].overflowing_add(self.v_reg[y]);
+                self.v_reg[x] = vx;
+                self.v_reg[0xF] = carry as u8;
+            }
+            // X -= Y
+            (8, _, _, 5) => {
+                let (vx, carry) = self.v_reg[x].overflowing_sub(self.v_reg[y]);
+                self.v_reg[x] = vx;
+                self.v_reg[0xF] = !carry as u8;
+            }
+            // X >>= 1
+            (8, _, _, 6) => {
+                let lsb = self.v_reg[x] & 1;
+                self.v_reg[x] >>= 1;
+                self.v_reg[0xF] = lsb;
+            }
+            // X =- Y
+            (8, _, _, 7) => {
+                let (vx, carry) = self.v_reg[y].overflowing_sub(self.v_reg[x]);
+                self.v_reg[x] = vx;
+                self.v_reg[0xF] = !carry as u8;
+            }
+            // X <<= 1
+            (8, _, _, 0xE) => {
+                let msb = (self.v_reg[x] >> 7) & 1;
+                self.v_reg[x] <<= 1;
+                self.v_reg[0xF] = msb;
+            }
+            // SNE X Y
+            (9, _, _, 0) => {
+                if self.v_reg[x] != self.v_reg[y] {
+                    self.pc += 2;
+                }
+            }
             // I = NNN
-            (0xa, _, _, _) => {
+            (0xA, _, _, _) => {
                 self.i_reg = nnn;
             }
+            // JMPR NNN
+            (0xB, _, _, _) => {
+                self.pc = nnn + self.v_reg[0] as u16;
+            }
+            // X = RAND & NN
+            (0xC, _, _, _) => {
+                self.v_reg[x] = fastrand::u8(0..=255) & nn;
+            }
             // DRAW X Y N
-            (0xd, _, _, _) => {
+            (0xD, _, _, _) => {
                 let x_coord = self.v_reg[x] as u16;
                 let y_coord = self.v_reg[y] as u16;
                 let num_rows = n as u16;
@@ -172,6 +273,78 @@ impl Emulator {
                 }
 
                 self.v_reg[0xf] = flipped as u8;
+            }
+            // SKP X
+            (0xE, _, 9, 0xE) => {
+                if self.keys[self.v_reg[x] as usize] {
+                    self.pc += 2;
+                }
+            }
+            // SKNP X
+            (0xE, _, 0xA, 1) => {
+                if !self.keys[self.v_reg[x] as usize] {
+                    self.pc += 2;
+                }
+            }
+            // X = DT
+            (0xF, _, 0, 7) => {
+                self.v_reg[x] = self.dt;
+            }
+            // X = K
+            (0xF, _, 0, 0xA) => {
+                let mut pressed = false;
+                for (i, key) in self.keys.iter().enumerate() {
+                    if *key {
+                        self.v_reg[x] = i as u8;
+                        pressed = true;
+                        break;
+                    }
+                }
+                if !pressed {
+                    self.pc -= 2;
+                }
+            }
+            // DT = X
+            (0xF, _, 1, 5) => {
+                self.dt = self.v_reg[x];
+            }
+            // ST = X
+            (0xF, _, 1, 8) => {
+                self.st = self.v_reg[x];
+            }
+            // I += X
+            (0xF, _, 1, 0xE) => {
+                self.i_reg += self.v_reg[x] as u16;
+            }
+            // I = SVX
+            (0xF, _, 2, 9) => {
+                let c = self.v_reg[x] as u16;
+                self.i_reg = c * 5;
+            }
+            // BCD
+            (0xF, _, 3, 3) => {
+                let vx = self.v_reg[x] as f32;
+
+                let hundreds = (vx / 100.0).floor() as u8;
+                let tens = ((vx / 10.0) % 10.0).floor() as u8;
+                let ones = (vx % 10.0) as u8;
+
+                let i = self.i_reg as usize;
+                self.ram[i] = hundreds;
+                self.ram[i + 1] = tens;
+                self.ram[i + 2] = ones;
+            }
+            // STORE
+            (0xF, _, 5, 5) => {
+                for idx in 0..=x {
+                    self.ram[self.i_reg as usize + idx] = self.v_reg[idx];
+                }
+            }
+            // LOAD
+            (0xF, _, 6, 5) => {
+                for idx in 0..=x {
+                    self.v_reg[idx] = self.ram[self.i_reg as usize + idx];
+                }
             }
             (_, _, _, _) => panic!("invalid op: {:#04x}", op),
         }

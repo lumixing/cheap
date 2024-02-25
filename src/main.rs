@@ -1,3 +1,5 @@
+use std::{env, fs};
+
 use crate::emulator::*;
 use macroquad::prelude::*;
 
@@ -5,6 +7,24 @@ mod emulator;
 
 const DEBUG_HEIGHT: i32 = 128;
 const PIXEL_SIZE: usize = 8;
+const KEYS: [KeyCode; 16] = [
+    KeyCode::X,
+    KeyCode::Key1,
+    KeyCode::Key2,
+    KeyCode::Key3,
+    KeyCode::Q,
+    KeyCode::W,
+    KeyCode::E,
+    KeyCode::A,
+    KeyCode::S,
+    KeyCode::D,
+    KeyCode::Z,
+    KeyCode::C,
+    KeyCode::Key4,
+    KeyCode::R,
+    KeyCode::F,
+    KeyCode::V,
+];
 
 fn window_conf() -> Conf {
     Conf {
@@ -21,30 +41,47 @@ async fn main() {
     let on_pixel_color = Color::from_hex(0x8bc8fe);
     let off_pixel_color = Color::from_hex(0x051b2c);
 
+    let args: Vec<String> = env::args().collect();
+    let data = fs::read(&args[1]).expect("expected input path");
+    let rate: usize = args
+        .get(2)
+        .unwrap_or(&"120".to_owned())
+        .parse()
+        .unwrap_or(120);
+
     let mut emu = Emulator::new();
+    emu.load(&data);
 
-    const DATA: [u8; 132] = [
-        // Offset 0x00000000 to 0x00000083
-        0x00, 0xE0, 0xA2, 0x2A, 0x60, 0x0C, 0x61, 0x08, 0xD0, 0x1F, 0x70, 0x09, 0xA2, 0x39, 0xD0,
-        0x1F, 0xA2, 0x48, 0x70, 0x08, 0xD0, 0x1F, 0x70, 0x04, 0xA2, 0x57, 0xD0, 0x1F, 0x70, 0x08,
-        0xA2, 0x66, 0xD0, 0x1F, 0x70, 0x08, 0xA2, 0x75, 0xD0, 0x1F, 0x12, 0x28, 0xFF, 0x00, 0xFF,
-        0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0xFF, 0x00, 0xFF, 0xFF, 0x00, 0xFF,
-        0x00, 0x38, 0x00, 0x3F, 0x00, 0x3F, 0x00, 0x38, 0x00, 0xFF, 0x00, 0xFF, 0x80, 0x00, 0xE0,
-        0x00, 0xE0, 0x00, 0x80, 0x00, 0x80, 0x00, 0xE0, 0x00, 0xE0, 0x00, 0x80, 0xF8, 0x00, 0xFC,
-        0x00, 0x3E, 0x00, 0x3F, 0x00, 0x3B, 0x00, 0x39, 0x00, 0xF8, 0x00, 0xF8, 0x03, 0x00, 0x07,
-        0x00, 0x0F, 0x00, 0xBF, 0x00, 0xFB, 0x00, 0xF3, 0x00, 0xE3, 0x00, 0x43, 0xE0, 0x00, 0xE0,
-        0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0xE0, 0x00, 0xE0,
-    ];
-    emu.load(&DATA);
-
+    let mut timer = 0.0;
     loop {
         if is_key_pressed(KeyCode::Escape) {
             break;
         }
 
-        if is_key_pressed(KeyCode::Space) {
-            emu.tick();
+        if is_key_pressed(KeyCode::Backspace) {
+            emu.reset();
+            emu.load(&data);
         }
+
+        for (i, key) in KEYS.iter().enumerate() {
+            if is_key_down(*key) {
+                emu.keys[i] = true;
+            }
+            if is_key_released(*key) {
+                emu.keys[i] = false;
+            }
+        }
+
+        timer += get_frame_time();
+        if timer > 1.0 / rate as f32 {
+            emu.tick();
+            emu.tick_timers();
+            timer = 0.0;
+        }
+
+        // if is_key_pressed(KeyCode::Space) {
+        // emu.tick();
+        // }
 
         for x in 0..SCREEN_WIDTH {
             for y in 0..SCREEN_HEIGHT {
@@ -65,12 +102,29 @@ async fn main() {
         }
 
         let debug_offset = SCREEN_HEIGHT * PIXEL_SIZE;
+        // let keys: Vec<usize> = emu
+        //     .keys
+        //     .iter()
+        //     .enumerate()
+        //     .filter(|(_, v)| **v)
+        //     .map(|(i, _)| i)
+        //     .collect();
 
         let debug_text_array = [
             format!("pc: {}", emu.pc),
             format!("op: {:#04x}", emu.op),
             format!("i: {}", emu.i_reg),
             format!("v_reg: {:?}", emu.v_reg),
+            format!(
+                "keys: {:?}",
+                // keys
+                emu.keys
+                    .iter()
+                    // .enumerate()
+                    // .collect::<bool>()
+                    .map(|v| *v as u8)
+                    .collect::<Vec<u8>>()
+            ),
         ];
 
         for (i, text) in debug_text_array.iter().enumerate() {
