@@ -42,7 +42,8 @@ async fn main() {
     let off_pixel_color = Color::from_hex(0x051b2c);
 
     let args: Vec<String> = env::args().collect();
-    let data = fs::read(&args[1]).expect("expected input path");
+    let input_path = args.get(1).expect("expected input path");
+    let data = fs::read(&input_path).expect("could not read file");
     let rate: usize = args
         .get(2)
         .unwrap_or(&"120".to_owned())
@@ -115,6 +116,7 @@ async fn main() {
             format!("op: {:#04x}", emu.op),
             format!("i: {}", emu.i_reg),
             format!("v_reg: {:?}", emu.v_reg),
+            format!("stack: {:?}", emu.stack),
             format!(
                 "keys: {:?}",
                 // keys
