@@ -1,4 +1,6 @@
 ## cheap: a chip8 emulator
+> this is a tool in the [charm](https://lumixing.github.io/charm/) toolset
+
 written in rust using [macroquad](https://github.com/not-fl3/macroquad)
 
 ![image](https://github.com/lumixing/cheap/assets/45235073/5459cfe6-9db2-4600-b44b-161bb4561ea6)
